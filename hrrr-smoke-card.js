@@ -107,7 +107,7 @@ class HrrrSmokeCard extends HTMLElement {
         select { border:1px solid var(--divider-color); border-radius:10px; padding:6px 8px; background:var(--secondary-background-color); color:var(--primary-text-color); font:inherit; }
         .foot { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; margin-top:11px; color:var(--secondary-text-color); font-size:.73rem; }
         a { color:var(--primary-color); text-decoration:none; }
-        @container(max-width:700px) { .maps { grid-template-columns:1fr; } .map-frame { aspect-ratio:1.5; } }
+        @container(max-width:620px) { .maps { grid-template-columns:1fr; } .map-frame { aspect-ratio:1.5; } }
         @media(max-width:700px) { ha-card { padding:14px; } }
       </style>
       <ha-card>

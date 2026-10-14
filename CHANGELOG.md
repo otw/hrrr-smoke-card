@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Keep the two forecast maps side by side in medium-width dashboard sections.
+
 ## v0.1.0 — Initial public release
 
 - Configurable HRRR near-surface smoke card with Bay Area and Tahoe examples.
