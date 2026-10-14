@@ -4,6 +4,12 @@ A Home Assistant dashboard card for hourly near-surface smoke forecast images. I
 
 ![Home Assistant custom card](https://img.shields.io/badge/Home%20Assistant-custom%20card-41BDF5)
 
+## Preview
+
+![Near-surface smoke forecast card showing Bay Area and Tahoe maps, time controls, and a smoke concentration legend](docs/smoke-card.jpg)
+
+Default NWS Sacramento source with Bay Area and Tahoe example views. Forecast times and imagery change as new runs are published.
+
 ## Install
 
 1. Copy [`hrrr-smoke-card.js`](hrrr-smoke-card.js) to your Home Assistant `/config/www/` directory.
