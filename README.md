@@ -135,6 +135,10 @@ Run the last command every two hours if you want locally generated loops. It ski
 
 With the default configuration, the card requests public images from `www.weather.gov` in the browser. It does not read Home Assistant entities or credentials and does not send telemetry. The samples contain no household information. Use the forecast as context alongside local sensor data and official air-quality guidance.
 
+## Releases
+
+Milestones use Git tags and GitHub Releases named `vMAJOR.MINOR.PATCH`. Release notes describe user-visible changes, configuration changes, and verification. While the card is in the `0.x` series, minor releases may change configuration; patch releases fix behavior without intentionally changing it. See [CHANGELOG.md](CHANGELOG.md) for the history.
+
 ## License
 
 MIT. NWS imagery remains subject to its source terms and attribution.
