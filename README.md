@@ -35,7 +35,7 @@ The card works with storage-managed and YAML dashboards. The default setup needs
 | Option | Default | Use |
 | --- | --- | --- |
 | `title` | `Near-surface smoke forecast` | Card heading |
-| `subtitle` | `Forecast model imagery` | Short explanatory line |
+| `subtitle` | Hidden | Optional short explanatory line |
 | `regions` | Bay Area and Tahoe | One or more named image views |
 | `regions[].name` | Required for custom views | Label shown over the map |
 | `regions[].sector` | `cwa` | Replaces `{sector}` in the URL |
