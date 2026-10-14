@@ -54,9 +54,13 @@ class HrrrSmokeCard extends HTMLElement {
     this.playing = true;
     this.version = 0;
     this.refreshId = (this.refreshId || 0) + 1;
+    this.frameRequestId = (this.frameRequestId || 0) + 1;
+    this.activeLayer = 0;
+    this.imageCache = new Map();
+    clearTimeout(this.playTimer);
     if (!this.root) this.root = this.attachShadow({ mode: "open" });
     const regionMarkup = this.settings.regions.map((_, i) =>
-      `<div class="region" id="region-${i}" role="link" tabindex="0"><div class="map" id="map-${i}"></div><div class="region-label" id="label-${i}"></div></div>`
+      `<div class="region" id="region-${i}" role="link" tabindex="0"><div class="map-frame"><div class="map" id="map-${i}-0"></div><div class="map" id="map-${i}-1"></div></div><div class="region-label" id="label-${i}"></div></div>`
     ).join("");
     const horizonMarkup = this.settings.horizons.map((h) =>
       `<option value="${h}">${h} hours</option>`
@@ -73,7 +77,9 @@ class HrrrSmokeCard extends HTMLElement {
         .status.stale { color:var(--error-color, #b3261e); }
         .maps { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
         .region { position:relative; min-width:0; border-radius:20px; overflow:hidden; background:#182b2d; cursor:pointer; border:1px solid var(--divider-color); }
-        .map { aspect-ratio:1.25; background-repeat:no-repeat; }
+        .map-frame { aspect-ratio:1.25; position:relative; }
+        .map { position:absolute; inset:0; background-repeat:no-repeat; visibility:hidden; }
+        .map.active { visibility:visible; }
         .region-label { position:absolute; left:10px; top:10px; padding:7px 10px; border-radius:999px; background:rgba(20,28,30,.8); color:white; font-size:.8rem; font-weight:650; backdrop-filter:blur(8px); }
         .region:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline:2px solid var(--primary-color); outline-offset:2px; }
         .legend { display:flex; align-items:center; gap:10px; margin:15px 0 13px; color:var(--secondary-text-color); font-size:.75rem; }
@@ -88,7 +94,7 @@ class HrrrSmokeCard extends HTMLElement {
         select { border:1px solid var(--divider-color); border-radius:10px; padding:6px 8px; background:var(--secondary-background-color); color:var(--primary-text-color); font:inherit; }
         .foot { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; margin-top:11px; color:var(--secondary-text-color); font-size:.73rem; }
         a { color:var(--primary-color); text-decoration:none; }
-        @container(max-width:700px) { .maps { grid-template-columns:1fr; } .map { aspect-ratio:1.5; } }
+        @container(max-width:700px) { .maps { grid-template-columns:1fr; } .map-frame { aspect-ratio:1.5; } }
         @media(max-width:700px) { ha-card { padding:14px; } }
       </style>
       <ha-card>
@@ -109,8 +115,13 @@ class HrrrSmokeCard extends HTMLElement {
       this.horizon = Number(e.target.value);
       if (this.imageAge !== undefined) this.applyHorizon();
     };
-    this.$("play").onclick = () => { this.playing = !this.playing; this.updatePlay(); };
-    this.$("seek").oninput = (e) => { this.current = Number(e.target.value); this.showFrame(); };
+    this.$("play").onclick = () => {
+      this.playing = !this.playing;
+      if (this.playing) this.scheduleNextFrame();
+      else clearTimeout(this.playTimer);
+      this.updatePlay();
+    };
+    this.$("seek").oninput = (e) => { this.showFrame(Number(e.target.value)); };
     this.settings.regions.forEach((region, i) => {
       this.$(`label-${i}`).textContent = region.name;
       const container = this.$(`region-${i}`);
@@ -118,8 +129,10 @@ class HrrrSmokeCard extends HTMLElement {
       const open = () => window.open(this.url(region, this.hours[this.current]), "_blank", "noopener,noreferrer");
       container.onclick = open;
       container.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
-      this.$(`map-${i}`).style.backgroundPosition = region.position;
-      this.$(`map-${i}`).style.backgroundSize = region.size;
+      for (const layer of [0, 1]) {
+        this.$(`map-${i}-${layer}`).style.backgroundPosition = region.position;
+        this.$(`map-${i}-${layer}`).style.backgroundSize = region.size;
+      }
     });
     if (this.isConnected) this.refresh();
   }
@@ -137,25 +150,23 @@ class HrrrSmokeCard extends HTMLElement {
     if (!this.settings) return;
     this.refresh();
     clearInterval(this.refreshTimer);
-    clearInterval(this.playTimer);
+    clearTimeout(this.playTimer);
     this.refreshTimer = setInterval(() => this.refresh(), TWO_HOURS);
-    this.playTimer = setInterval(() => {
-      if (this.playing && this.hours.length > 1) {
-        this.current = (this.current + 1) % this.hours.length;
-        this.showFrame();
-      }
-    }, 950);
   }
 
   disconnectedCallback() {
     clearInterval(this.refreshTimer);
-    clearInterval(this.playTimer);
+    clearTimeout(this.playTimer);
     this.refreshId++;
+    this.frameRequestId++;
+    this.imageCache.clear();
   }
 
   async refresh() {
     const id = ++this.refreshId;
-    this.version = Math.floor(Date.now() / TWO_HOURS);
+    const version = Math.floor(Date.now() / TWO_HOURS);
+    if (version !== this.version) this.imageCache.clear();
+    this.version = version;
     const maxHour = Math.max(...this.settings.horizons);
     const requests = new Map();
     const inspect = (region, hour) => {
@@ -198,23 +209,71 @@ class HrrrSmokeCard extends HTMLElement {
 
   applyHorizon() {
     this.hours = this.availableHours.filter((hour) => hour <= this.horizon);
-    this.current = Math.min(this.current, this.hours.length - 1);
+    const selected = Math.min(this.current, this.hours.length - 1);
     this.$("seek").max = String(this.hours.length - 1);
     const last = this.hours[this.hours.length - 1];
     this.$("range").textContent = `Available F00–F${String(last).padStart(2, "0")} (+${last}h from run start) · ${this.horizon}h selected`;
     this.$("status").textContent = this.imageAge > SIX_HOURS ? "Forecast may be stale" :
       last < this.horizon ? `${last} of ${this.horizon}h available` : `${this.horizon}h available`;
     this.$("status").classList.toggle("stale", this.imageAge > SIX_HOURS);
-    this.showFrame();
+    this.showFrame(selected);
   }
 
-  showFrame() {
-    const hour = this.hours[this.current];
-    this.settings.regions.forEach((region, i) => {
-      this.$(`map-${i}`).style.backgroundImage = `url("${this.url(region, hour)}")`;
+  preload(url) {
+    if (!this.imageCache.has(url)) {
+      const image = new Image();
+      let ready;
+      if (typeof image.decode === "function") {
+        image.src = url;
+        ready = image.decode();
+      } else {
+        ready = new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = url; });
+      }
+      this.imageCache.set(url, ready.then(() => image).catch(() => {
+        this.imageCache.delete(url);
+        throw new Error(`Could not load forecast image: ${url}`);
+      }));
+    }
+    return this.imageCache.get(url);
+  }
+
+  async showFrame(index = this.current) {
+    clearTimeout(this.playTimer);
+    const request = ++this.frameRequestId;
+    const hour = this.hours[index];
+    if (hour === undefined) return;
+    const urls = this.settings.regions.map((region) => this.url(region, hour));
+    try {
+      await Promise.all([...new Set(urls)].map((url) => this.preload(url)));
+    } catch {
+      if (request === this.frameRequestId) this.scheduleNextFrame(2000);
+      return;
+    }
+    if (request !== this.frameRequestId || !this.isConnected) return;
+    const nextLayer = 1 - this.activeLayer;
+    urls.forEach((url, i) => {
+      this.$(`map-${i}-${nextLayer}`).style.backgroundImage = `url("${url}")`;
     });
-    this.$("seek").value = String(this.current);
+    this.settings.regions.forEach((_, i) => {
+      this.$(`map-${i}-${nextLayer}`).classList.add("active");
+      this.$(`map-${i}-${this.activeLayer}`).classList.remove("active");
+    });
+    this.activeLayer = nextLayer;
+    this.current = index;
+    this.$("seek").value = String(index);
     this.$("hour").textContent = `F${String(hour).padStart(2,"0")} · +${hour}h`;
+    this.scheduleNextFrame();
+    if (this.playing && this.hours.length > 1) {
+      const nextHour = this.hours[(index + 1) % this.hours.length];
+      const nextUrls = new Set(this.settings.regions.map((region) => this.url(region, nextHour)));
+      Promise.all([...nextUrls].map((url) => this.preload(url))).catch(() => {});
+    }
+  }
+
+  scheduleNextFrame(delay = 950) {
+    clearTimeout(this.playTimer);
+    if (!this.playing || !this.isConnected || this.hours.length < 2) return;
+    this.playTimer = setTimeout(() => this.showFrame((this.current + 1) % this.hours.length), delay);
   }
 
   updatePlay() {

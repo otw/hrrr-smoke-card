@@ -98,6 +98,7 @@ The image host must allow browser `HEAD` requests across origins and provide an 
 - **Custom element doesn't exist:** confirm the JavaScript module resource URL and refresh the browser. Files under `/config/www/` appear under `/local/` in Home Assistant.
 - **Blank map with “Forecast unavailable”:** open the image URL in the same browser and check whether the host allows cross-origin `HEAD` requests with readable `Last-Modified` and `Content-Type` headers. A server-side proxy can provide those headers for hosts that do not.
 - **Only a few hours available:** check the source page. The card intentionally omits forecast-hour files left over from older runs; selecting 24 hours cannot fill an incomplete publication.
+- **Playback pauses briefly between frames:** the card waits for the next image to finish loading and decoding, so slow connections hold the current map rather than flashing an empty one.
 - **Map crop misses your area:** change the view's `sector`, `position`, and `size`. Select a map to inspect its full source image.
 - **An update does not appear:** increase the resource URL's `v=` number and reload the dashboard.
 
@@ -106,13 +107,14 @@ The image host must allow browser `HEAD` requests across origins and provide an 
 - Checks the selected images when the card opens and every two hours while it is displayed.
 - Reads image `Last-Modified` headers and keeps only consecutive frames from the same forecast publication. This avoids mixing an old forecast with a newly published run.
 - Marks a forecast image older than six hours as potentially stale. If the source cannot be reached, it displays an unavailable status.
+- Preloads and decodes the next image, then swaps both map views together. Slow images hold the current frame; playback never advances the hour label ahead of the visible maps.
 - Plays the available forecast hours, with pause and scrub controls. Select either map to open the full NWS image.
 
 The default colored map is a **forecast of near-surface smoke concentration**, not a live air-quality measurement or AQI. If a source changes its map layout, crop positions may need updating. Default source and forecast context: [NWS Sacramento Experimental Smoke Forecast](https://www.weather.gov/sto/ExperimentalSmokeForecast).
 
 ## Optional animated WebP builder
 
-[`tools/nws_smoke_loop.py`](tools/nws_smoke_loop.py) produces `bay-area.webp`, `tahoe.webp`, and `manifest.json` from the default Sacramento images for uses outside the Home Assistant card. The card itself does not use these files or the card's custom source settings.
+[`tools/nws_smoke_loop.py`](tools/nws_smoke_loop.py) produces animated `bay-area.webp`, `tahoe.webp`, and `manifest.json` from the default Sacramento images for uses outside the Home Assistant card. The card plays source images directly, so smooth playback does not require a video conversion job and retains the hour selector and full-image links.
 
 ```sh
 python3 -m venv .venv
