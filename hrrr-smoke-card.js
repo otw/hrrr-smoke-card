@@ -9,6 +9,7 @@ const DEFAULT_REGIONS = [
 ];
 const TWO_HOURS = 2 * 60 * 60 * 1000;
 const SIX_HOURS = 6 * 60 * 60 * 1000;
+const ONE_HOUR = 60 * 60 * 1000;
 
 class HrrrSmokeCard extends HTMLElement {
   static getStubConfig() { return { type: "custom:hrrr-smoke-card" }; }
@@ -31,12 +32,22 @@ class HrrrSmokeCard extends HTMLElement {
     }
     const sourceUrl = options.source_url || "https://www.weather.gov/sto/ExperimentalSmokeForecast";
     if (!/^https?:\/\//i.test(sourceUrl)) throw new Error("source_url must be an HTTP(S) URL");
+    const timeZone = options.time_zone || "America/Los_Angeles";
+    try { new Intl.DateTimeFormat("en-US", { timeZone }); }
+    catch { throw new Error("time_zone must be a valid IANA time zone"); }
+    const startOffset = options.forecast_start_offset_hours === undefined ?
+      (options.image_template === undefined ? -1 : null) : options.forecast_start_offset_hours;
+    if (startOffset !== null && (!Number.isInteger(startOffset) || startOffset < -24 || startOffset > 24)) {
+      throw new Error("forecast_start_offset_hours must be an integer from -24 to 24");
+    }
     this.settings = {
       title: options.title || "Near-surface smoke forecast",
-      subtitle: options.subtitle || "Forecast model imagery",
+      subtitle: options.subtitle || "",
       sourceName: options.source_name || "NWS Sacramento",
       sourceUrl,
       template,
+      timeZone,
+      startOffset,
       horizons: [...new Set(horizons)].sort((a, b) => a - b),
       regions: regions.map((r) => ({
         name: r.name.trim(),
@@ -49,6 +60,7 @@ class HrrrSmokeCard extends HTMLElement {
       (this.settings.horizons.includes(12) ? 12 : this.settings.horizons[0]);
     this.availableHours = [0];
     this.imageAge = undefined;
+    this.forecastStart = undefined;
     this.hours = [0];
     this.current = 0;
     this.playing = true;
@@ -75,6 +87,7 @@ class HrrrSmokeCard extends HTMLElement {
         .range { color:var(--primary-text-color); font-weight:550; }
         .status { border-radius:999px; padding:7px 10px; background:var(--secondary-background-color); color:var(--secondary-text-color); font-size:.75rem; white-space:nowrap; }
         .status.stale { color:var(--error-color, #b3261e); }
+        .status[hidden], .sub[hidden] { display:none; }
         .maps { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
         .region { position:relative; min-width:0; border-radius:20px; overflow:hidden; background:#182b2d; cursor:pointer; border:1px solid var(--divider-color); }
         .map-frame { aspect-ratio:1.25; position:relative; }
@@ -89,7 +102,7 @@ class HrrrSmokeCard extends HTMLElement {
         button { border:0; border-radius:50%; width:39px; height:39px; flex:none; color:var(--primary-text-color); background:var(--secondary-background-color); cursor:pointer; font-size:1.1rem; }
         button:hover { background:var(--primary-color); color:var(--text-primary-color, white); }
         input[type=range] { flex:1; min-width:80px; accent-color:var(--primary-color); cursor:pointer; }
-        .hour { color:var(--primary-text-color); font-weight:650; font-variant-numeric:tabular-nums; min-width:78px; text-align:right; }
+        .hour { color:var(--primary-text-color); font-weight:650; font-variant-numeric:tabular-nums; min-width:116px; text-align:right; }
         .horizon { display:flex; align-items:center; gap:6px; color:var(--secondary-text-color); font-size:.75rem; }
         select { border:1px solid var(--divider-color); border-radius:10px; padding:6px 8px; background:var(--secondary-background-color); color:var(--primary-text-color); font:inherit; }
         .foot { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; margin-top:11px; color:var(--secondary-text-color); font-size:.73rem; }
@@ -98,15 +111,16 @@ class HrrrSmokeCard extends HTMLElement {
         @media(max-width:700px) { ha-card { padding:14px; } }
       </style>
       <ha-card>
-        <div class="top"><div><h2 id="title"></h2><div class="sub" id="subtitle"></div><div class="range" id="range">Checking available forecast hours…</div></div><span class="status" id="status">Checking forecast…</span></div>
+        <div class="top"><div><h2 id="title"></h2><div class="sub" id="subtitle"></div><div class="range" id="range">Checking forecast…</div></div><span class="status" id="status" hidden></span></div>
         <div class="maps">${regionMarkup}</div>
         <div class="legend" id="legend"><span>0</span><div class="ramp"></div><span>240+ µg/m³</span></div>
-        <div class="controls"><button id="play" aria-label="Pause animation" title="Pause animation">Ⅱ</button><input id="seek" type="range" min="0" max="0" value="0" aria-label="Forecast hour"><span class="hour" id="hour">F00 · +0h</span><label class="horizon">Show up to <select id="horizon" aria-label="Forecast horizon">${horizonMarkup}</select></label></div>
-        <div class="foot"><span id="issued">Checking image times…</span><a id="source" target="_blank" rel="noopener noreferrer"></a></div>
+        <div class="controls"><button id="play" aria-label="Pause animation" title="Pause animation">Ⅱ</button><input id="seek" type="range" min="0" max="0" value="0" aria-label="Forecast hour"><span class="hour" id="hour">—</span><label class="horizon">Show up to <select id="horizon" aria-label="Forecast horizon">${horizonMarkup}</select></label></div>
+        <div class="foot"><span id="issued"></span><a id="source" target="_blank" rel="noopener noreferrer"></a></div>
       </ha-card>`;
     this.$ = (id) => this.root.getElementById(id);
     this.$("title").textContent = this.settings.title;
     this.$("subtitle").textContent = this.settings.subtitle;
+    this.$("subtitle").hidden = !this.settings.subtitle;
     this.$("source").textContent = `${this.settings.sourceName} ↗`;
     this.$("source").href = this.settings.sourceUrl;
     this.$("legend").hidden = options.image_template !== undefined && options.show_legend !== true;
@@ -144,6 +158,28 @@ class HrrrSmokeCard extends HTMLElement {
       .replaceAll("{hour3}", String(hour).padStart(3, "0"))
       .replaceAll("{hour}", String(hour).padStart(2, "0"));
     return `${path}${path.includes("?") ? "&" : "?"}v=${this.version}`;
+  }
+
+  clockTime(milliseconds, withDate = false) {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: this.settings.timeZone,
+      ...(withDate ? { weekday: "short", month: "short", day: "numeric" } : {}),
+      hour: "numeric", minute: "2-digit",
+    }).format(new Date(milliseconds));
+  }
+
+  zoneName(milliseconds) {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: this.settings.timeZone, timeZoneName: "short",
+    }).formatToParts(new Date(milliseconds)).find((part) => part.type === "timeZoneName").value;
+  }
+
+  forecastWindow(lastHour) {
+    const start = this.forecastStart;
+    const end = start + lastHour * ONE_HOUR;
+    const startZone = this.zoneName(start);
+    const endZone = this.zoneName(end);
+    return `${this.clockTime(start, true)}${startZone === endZone ? "" : ` ${startZone}`} – ${this.clockTime(end, true)} ${endZone}`;
   }
 
   connectedCallback() {
@@ -195,12 +231,14 @@ class HrrrSmokeCard extends HTMLElement {
       if (!hours.length) throw new Error("No matching frames");
       this.availableHours = hours;
       this.imageAge = Date.now() - first;
-      const timestamp = new Date(first).toLocaleString([], { weekday:"short", hour:"numeric", minute:"2-digit", timeZoneName:"short" });
-      this.$("issued").textContent = `Images updated ${timestamp} · ${hours.length} matching forecast frames`;
+      this.forecastStart = this.settings.startOffset === null ? undefined :
+        Math.floor(first / ONE_HOUR) * ONE_HOUR + this.settings.startOffset * ONE_HOUR;
+      this.$("issued").textContent = `Updated ${this.clockTime(first, true)} ${this.zoneName(first)}`;
       this.applyHorizon();
     } catch {
       if (id !== this.refreshId || !this.isConnected) return;
       this.$("status").textContent = "Forecast unavailable";
+      this.$("status").hidden = false;
       this.$("status").classList.add("stale");
       this.$("range").textContent = "Could not determine the forecast range.";
       this.$("issued").textContent = "Could not reach forecast imagery; retrying in two hours";
@@ -212,9 +250,10 @@ class HrrrSmokeCard extends HTMLElement {
     const selected = Math.min(this.current, this.hours.length - 1);
     this.$("seek").max = String(this.hours.length - 1);
     const last = this.hours[this.hours.length - 1];
-    this.$("range").textContent = `Available F00–F${String(last).padStart(2, "0")} (+${last}h from run start) · ${this.horizon}h selected`;
-    this.$("status").textContent = this.imageAge > SIX_HOURS ? "Forecast may be stale" :
-      last < this.horizon ? `${last} of ${this.horizon}h available` : `${this.horizon}h available`;
+    this.$("range").textContent = this.forecastStart === undefined ?
+      `F00–F${String(last).padStart(2, "0")}` : this.forecastWindow(last);
+    this.$("status").textContent = "Forecast may be stale";
+    this.$("status").hidden = this.imageAge <= SIX_HOURS;
     this.$("status").classList.toggle("stale", this.imageAge > SIX_HOURS);
     this.showFrame(selected);
   }
@@ -261,7 +300,8 @@ class HrrrSmokeCard extends HTMLElement {
     this.activeLayer = nextLayer;
     this.current = index;
     this.$("seek").value = String(index);
-    this.$("hour").textContent = `F${String(hour).padStart(2,"0")} · +${hour}h`;
+    this.$("hour").textContent = this.forecastStart === undefined ?
+      `F${String(hour).padStart(2, "0")}` : this.clockTime(this.forecastStart + hour * ONE_HOUR);
     this.scheduleNextFrame();
     if (this.playing && this.hours.length > 1) {
       const nextHour = this.hours[(index + 1) % this.hours.length];

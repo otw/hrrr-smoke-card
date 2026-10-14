@@ -42,15 +42,19 @@ The card works with storage-managed and YAML dashboards. The default setup needs
 | `regions[].position` | `center` | CSS `background-position` |
 | `regions[].size` | `cover` | CSS `background-size` |
 | `horizons` | `[6, 12, 24]` | Choices in the forecast range selector, up to 48 |
+| `time_zone` | `America/Los_Angeles` | IANA time zone used for the forecast window, frame time, and update time |
+| `forecast_start_offset_hours` | `-1` for the default NWS source | Hours from the image publication hour to the valid time of F00; set for another source to show clock times |
 | `image_template` | NWS Sacramento hourly image URL | URL pattern with `{hour}` or `{hour3}` |
 | `source_name` / `source_url` | NWS Sacramento page | Source link and attribution |
 | `show_legend` | On for the default source; off for custom templates | Show the NWS color ramp |
 
 ## Forecast range
 
-The card has a **Show up to** selector for 6, 12, and 24 forecast hours. It shows the selected frame as `F03 · +3h` and states the actual range available from a single publication, such as `F00–F03 (+3h from run start) · 12h selected`. These hours are relative to the model run's start, not necessarily the current clock time. Open the full source image for its printed valid time.
+The card has a **Show up to** selector for 6, 12, and 24 forecast hours. For the default NWS Sacramento source, the top line shows the clock time of the first and last available frames, such as `Tue, Oct 13, 5:00 PM – Wed, Oct 14, 5:00 AM PDT`. The time beside the scrubber shows the selected frame's clock time. The default `America/Los_Angeles` zone switches between PDT and PST automatically; set `time_zone` to another IANA zone if desired.
 
-Selecting 12 or 24 hours does not create missing forecasts. If the source has published only F00–F03 from the current run, the card stops at F03 and shows **3 of 12h available**. As more matching frames are published, the card includes them on its next refresh.
+The NWS graphics do not expose a machine-readable valid time. The card estimates F00 as one hour before the hour on the image's `Last-Modified` timestamp, matching the current NWS Sacramento publication pattern. Check the valid time printed on the full source image if exact timing matters. If that pattern changes, adjust `forecast_start_offset_hours`; for another source, set it to that source's offset. Without an offset for a custom source, the card falls back to F00 notation rather than showing an unverified clock time.
+
+Selecting 12 or 24 hours does not create missing forecasts. If the source has published only F00–F03 from the current run, the card stops at F03 and shows the window through the last available frame. As more matching frames are published, the card includes them on its next refresh.
 
 ## Choose regions and images
 
@@ -69,6 +73,7 @@ regions:
     position: center
     size: contain
 horizons: [6, 12, 24]
+time_zone: America/Los_Angeles
 ```
 
 `position` and `size` are CSS `background-position` and `background-size` values. Use `cover` or `contain` to show a whole sector image; use percentages and a larger size to crop into a place. The card checks every selected sector and keeps only hours available from the same run in all views.
@@ -87,6 +92,8 @@ regions:
     position: center
     size: contain
 horizons: [6, 12, 24]
+time_zone: America/New_York
+forecast_start_offset_hours: 0
 ```
 
 The image host must allow browser `HEAD` requests across origins and provide an `image/*` content type plus a `Last-Modified` header. Files must represent hourly forecast steps and stable filenames for each hour. The card rejects frames with publication times more than 45 minutes apart. If the host uses another publication format or blocks cross-origin browser requests, you will need a compatible image proxy or adapter. The colored NWS legend is hidden for custom templates; set `show_legend: true` only if that scale matches your source.

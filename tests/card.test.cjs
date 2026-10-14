@@ -81,8 +81,13 @@ vm.runInNewContext(
   await card.refresh();
   await card.showFrame(0);
   assert.deepEqual([...card.hours], [0, 1, 2, 3]);
-  assert.match(card.$("range").textContent, /F00–F03.*12h selected/);
-  assert.equal(card.$("status").textContent, "3 of 12h available");
+  assert.equal(card.forecastStart, Math.floor(current.getTime() / 3600000) * 3600000 - 3600000);
+  assert.match(card.$("range").textContent, / – .* (PDT|PST)$/);
+  assert.doesNotMatch(card.$("range").textContent, /F00/);
+  assert.equal(card.$("status").hidden, true);
+  card.forecastStart = Date.parse("2026-10-14T00:00:00Z");
+  assert.equal(card.forecastWindow(12), "Tue, Oct 13, 5:00 PM – Wed, Oct 14, 5:00 AM PDT");
+  card.forecastStart = Math.floor(current.getTime() / 3600000) * 3600000 - 3600000;
   assert.equal(card.$("map-0-1").classList.contains("active"), true);
 
   holdHour = 2;
@@ -97,15 +102,20 @@ vm.runInNewContext(
   holdHour = null;
 
   card.$("horizon").onchange({ target: { value: "6" } });
-  assert.equal(card.$("status").textContent, "3 of 6h available");
+  assert.equal(card.$("status").hidden, true);
 
   card.isConnected = false;
   card.setConfig({
     image_template: "https://example.org/{sector}/forecast-{hour3}.png",
     regions: [{ name: "Western region", sector: "west", size: "contain" }],
     horizons: [6, 12, 24],
+    time_zone: "America/New_York",
+    forecast_start_offset_hours: 0,
   });
   assert.match(card.url(card.settings.regions[0], 12), /west\/forecast-012\.png/);
+  assert.equal(card.settings.timeZone, "America/New_York");
+  assert.equal(card.settings.startOffset, 0);
   assert.equal(card.$("legend").hidden, true);
+  assert.throws(() => card.setConfig({ time_zone: "Not/A_Time_Zone" }), /IANA time zone/);
   console.log("Card source and forecast-horizon checks passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
